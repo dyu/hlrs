@@ -1,3 +1,7 @@
+use mimalloc::MiMalloc;
+#[global_allocator]
+static GLOBAL: MiMalloc = MiMalloc;
+
 use axum::{
   Router,
   http::{StatusCode, HeaderValue},
@@ -24,9 +28,10 @@ async fn insert_headers(req: Request, next: Next) -> Result<Response, StatusCode
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
   let args: Vec<String> = env::args().collect();
-  let count = args.len() - 1;
-  let port: u32 = if count != 0 {
-    u32::from_str_radix(&args[1], 10).unwrap()
+  let count = args.len();
+  let offset = 1;
+  let port: u32 = if count > offset {
+    u32::from_str_radix(&args[offset], 10).unwrap()
   } else {
     8080
   };
@@ -36,7 +41,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
   let mut r: Router = Router::new()
     .nest_service("/", ServeDir::new(Path::new(".")));
   
-  let mut i = 2;
+  let mut i = offset + 1;
   while i < count {
     let entry: Vec<&str> = args[i].split(':').collect();
     if entry[1].ends_with(".html") {
