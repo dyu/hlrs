@@ -13,17 +13,32 @@ use notify::Watcher;
 use std::path::Path;
 use tower_http::services::{ServeDir, ServeFile};
 use tower_livereload::LiveReloadLayer;
-use std::{env, format};
+use std::{env, format, fs};
 
-async fn insert_headers(req: Request, next: Next) -> Result<Response, StatusCode> {
+fn is_truthy(str: String) -> bool {
+  str == "1" || str == "true"
+}
+
+async fn insert_watch_headers(req: Request, next: Next) -> Result<Response, StatusCode> {
   let mut res = next.run(req).await;
   let headers = res.headers_mut();
   headers.insert("Cache-Control", HeaderValue::from_static("no-cache, no-store, must-revalidate"));
   headers.insert("Pragma", HeaderValue::from_static("no-cache"));
+  headers.insert("Access-Control-Allow-Origin", HeaderValue::from_static("*"));
   headers.insert("Cross-Origin-Embedder-Policy", HeaderValue::from_static("require-corp"));
   headers.insert("Cross-Origin-Opener-Policy", HeaderValue::from_static("same-origin"));
   Ok(res)
 }
+
+async fn insert_serve_headers(req: Request, next: Next) -> Result<Response, StatusCode> {
+  let mut res = next.run(req).await;
+  let headers = res.headers_mut();
+  headers.insert("Access-Control-Allow-Origin", HeaderValue::from_static("*"));
+  headers.insert("Cross-Origin-Embedder-Policy", HeaderValue::from_static("require-corp"));
+  headers.insert("Cross-Origin-Opener-Policy", HeaderValue::from_static("same-origin"));
+  Ok(res)
+}
+
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -36,10 +51,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     8080
   };
   let bind = format!("0.0.0.0:{port}");
-  let livereload = LiveReloadLayer::new();
-  let reloader = livereload.reloader();
-  let mut r: Router = Router::new()
-    .nest_service("/", ServeDir::new(Path::new(".")));
+  let base_dir = fs::canonicalize(".")?;
+  
+  let mut r = Router::new().nest_service("/", ServeDir::new(base_dir.as_path()));
   
   let mut i = offset + 1;
   while i < count {
@@ -52,12 +66,27 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     i += 1;
   }
   
-  let app = r.layer(middleware::from_fn(insert_headers))
-    .layer(livereload);
-  
-  let mut watcher = notify::recommended_watcher(move |_| reloader.reload())?;
-  watcher.watch(Path::new("."), notify::RecursiveMode::Recursive)?;
   let listener = tokio::net::TcpListener::bind(bind).await.unwrap();
-  axum::serve(listener, app).await.unwrap();
+  if env::var("SKIP_WATCH").is_ok_and(is_truthy) {
+    println!("Serving {}/*", base_dir.display());
+    
+    axum::serve(
+      listener,
+      r.layer(middleware::from_fn(insert_serve_headers)),
+    ).await.unwrap();
+  } else {
+    println!("Watching {}/*", base_dir.display());
+    
+    let livereload = LiveReloadLayer::new();
+    let reloader = livereload.reloader();
+    
+    let mut watcher = notify::recommended_watcher(move |_| reloader.reload())?;
+    watcher.watch(base_dir.as_path(), notify::RecursiveMode::Recursive)?;
+    
+    axum::serve(
+      listener,
+      r.layer(middleware::from_fn(insert_watch_headers)).layer(livereload),
+    ).await.unwrap();
+  }
   Ok(())
 }
