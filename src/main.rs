@@ -68,14 +68,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
   
   let listener = tokio::net::TcpListener::bind(bind).await.unwrap();
   if env::var("SKIP_WATCH").is_ok_and(is_truthy) {
-    println!("Serving {}/*", base_dir.display());
+    println!("Serving {}/* at http://localhost:{}", base_dir.display(), port);
     
     axum::serve(
       listener,
       r.layer(middleware::from_fn(insert_serve_headers)),
     ).await.unwrap();
   } else {
-    println!("Watching {}/*", base_dir.display());
+    println!("Watching+Serving {}/* at http://localhost:{}", base_dir.display(), port);
     
     let livereload = LiveReloadLayer::new();
     let reloader = livereload.reloader();
