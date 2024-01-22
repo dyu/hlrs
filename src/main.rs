@@ -10,10 +10,9 @@ use axum::{
   extract::{Request},
 };
 use notify::Watcher;
-use std::path::Path;
+use std::{env, format, fs, path::Path};
 use tower_http::services::{ServeDir, ServeFile};
 use tower_livereload::LiveReloadLayer;
-use std::{env, format, fs};
 
 fn is_truthy(str: String) -> bool {
   str == "1" || str == "true"
@@ -53,15 +52,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
   let bind = format!("0.0.0.0:{port}");
   let base_dir = fs::canonicalize(".")?;
   
-  let mut r = Router::new().nest_service("/", ServeDir::new(base_dir.as_path()));
-  
+  let mut r = Router::new();
   let mut i = offset + 1;
+  
+  if i == count || !args[i].starts_with("/:") {
+    r = r.nest_service("/", ServeDir::new(base_dir.as_path())
+        .not_found_service(ServeFile::new(Path::new("./index.html"))));
+  }
+  
   while i < count {
     let entry: Vec<&str> = args[i].split(':').collect();
-    if entry[1].ends_with(".html") {
+    if !entry[1].ends_with(".html") {
+      r = r.nest_service(entry[0], ServeDir::new(Path::new(entry[1])));
+    } else if entry[0].ends_with("/") {
       r = r.nest_service(entry[0], ServeFile::new(Path::new(entry[1])));
     } else {
-      r = r.nest_service(entry[0], ServeDir::new(Path::new(entry[1])));
+      r = r.route_service(entry[0], ServeFile::new(Path::new(entry[1])));
     }
     i += 1;
   }
